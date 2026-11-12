@@ -21,21 +21,14 @@
     ],
     "security": {
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
-      "capabilities": [
-        "default",
-        "paths",
-        "plans",
-        "apply",
-        "mcp-check"
-      ]
+      "capabilities": ["default", "paths", "plans", "apply", "mcp-check"]
     }
   },
   "bundle": {
+    "category": "DeveloperTool",
+    "shortDescription": "Manage local coding agent resources",
     "active": true,
     "targets": "all",
-    "icon": [
-      "icons/icon.icns",
-      "icons/icon.png"
-    ]
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"]
   }
 }

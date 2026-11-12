@@ -64,7 +64,11 @@ async fn git(args: Vec<String>) -> Result<String> {
     .args(args)
     .env("GIT_TERMINAL_PROMPT", "0")
     .kill_on_drop(true);
-    let output = tokio::time::timeout(Duration::from_secs(45), cmd.output())
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let (child, _tree) =
+        crate::platform::spawn(&mut cmd).map_err(|_| "无法启动 Git，请确认已安装")?;
+    let output = tokio::time::timeout(Duration::from_secs(45), child.wait_with_output())
         .await
         .map_err(|_| "Git 操作超时（45 秒）")?
         .map_err(|_| "无法启动 Git，请确认已安装")?;
@@ -935,6 +939,11 @@ pub fn import_library(hub: State<Hub>, path: String, overwrite: bool) -> Result<
     let mut seen = std::collections::BTreeSet::new();
     let (mut added, mut replaced, mut skipped) = (0, 0, 0);
     for item in bundle.skills {
+        // Windows does not expose Unix executable bits. Keep the applied snapshot comparable.
+        let item = BundleSkill {
+            content: native_snapshot(item.content),
+            ..item
+        };
         valid_name(&item.skill.name)?;
         validate_skill(&item.content)?;
         let mut skill = item.skill;
@@ -987,13 +996,13 @@ pub fn import_library(hub: State<Hub>, path: String, overwrite: bool) -> Result<
 }
 #[tauri::command]
 #[specta::specta]
-pub fn plugin_guide(agent: String) -> Result<()> {
+pub fn plugin_guide(app: AppHandle, agent: String) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
     if !scanner::AGENTS.contains(&agent.as_str()) {
         return Err("未知 Agent".into());
     }
-    std::process::Command::new("/usr/bin/open")
-        .arg(scanner::guide(&agent))
-        .spawn()
+    app.opener()
+        .open_url(scanner::guide(&agent), None::<&str>)
         .map_err(|_| "无法打开官方管理文档")?;
     Ok(())
 }

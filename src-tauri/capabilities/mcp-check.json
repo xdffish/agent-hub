@@ -2,7 +2,7 @@
   "identifier": "mcp-check",
   "description": "Check discovered MCP configuration after native confirmation",
   "windows": ["main"],
-  "platforms": ["macOS"],
+  "platforms": ["macOS", "windows", "linux"],
   "local": true,
   "permissions": ["allow-check-mcp"]
 }

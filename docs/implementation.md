@@ -2,6 +2,8 @@
 
 日期：2026-11-10。版本：0.1.0。本文件记录已实现内容，产品目标见 [product-spec.md](product-spec.md)。
 
+本文保留初版的实现与验证记录。2026-11-12 的 Windows/Linux 适配及当前验证范围见 [cross-platform.md](cross-platform.md)。
+
 ## 本地 Skill 规范补齐
 
 上一轮初版没有先读取项目本地 Tauri 技能。本轮按总入口和适用子技能补齐，设计与逐命令范围见 [security-scope.md](security-scope.md)，实施清单见 [hardening-plan.md](hardening-plan.md)。

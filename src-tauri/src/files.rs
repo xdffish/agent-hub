@@ -1,6 +1,5 @@
 use crate::model::*;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::PermissionsExt;
 use std::{
     fs,
     path::{Component, Path, PathBuf},
@@ -31,6 +30,56 @@ pub fn fingerprint(s: &Snapshot) -> String {
 pub fn path_string(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
+fn portable_path(p: &Path) -> String {
+    p.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Exchange paths use '/' on every OS. Reject Windows aliases and drive paths
+/// even on Unix so a bundle cannot change meaning when moved to another host.
+fn valid_relative(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('/').all(|part| {
+            !part.is_empty()
+                && part != "."
+                && part != ".."
+                && !part.ends_with(['.', ' '])
+                && !part
+                    .chars()
+                    .any(|c| c.is_control() || "\\:<>\"|?*".contains(c))
+                && !windows_reserved(part)
+        })
+}
+fn windows_reserved(value: &str) -> bool {
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || stem
+        .strip_prefix("COM")
+        .or_else(|| stem.strip_prefix("LPT"))
+        .is_some_and(|n| {
+            matches!(
+                n,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+}
+pub fn native_snapshot(mut snapshot: Snapshot) -> Snapshot {
+    if cfg!(windows) {
+        for entry in &mut snapshot.entries {
+            entry.executable = false;
+        }
+    }
+    snapshot
+}
 pub fn valid_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 120
@@ -39,6 +88,8 @@ pub fn valid_name(name: &str) -> Result<()> {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
         || name == "."
         || name == ".."
+        || name.ends_with('.')
+        || windows_reserved(name)
     {
         return Err("名称仅允许字母、数字、点、短横线和下划线（不超过 120 字符）".into());
     }
@@ -52,22 +103,15 @@ pub fn checked_path(value: &str) -> Result<PathBuf> {
     Ok(p)
 }
 pub fn private_dir(path: &Path) -> Result<()> {
-    fs::create_dir_all(path).map_err(|_| "无法创建应用数据目录".to_string())?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|_| "无法设置目录权限".to_string())
+    crate::platform::private_dir(path).map_err(|_| "无法设置目录权限".to_string())
 }
 pub fn atomic_write(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
     let parent = path.parent().ok_or("路径没有父目录")?;
     fs::create_dir_all(parent).map_err(|_| "无法创建目标目录".to_string())?;
     let tmp = parent.join(format!(".agent-hub-{}", id()));
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(if executable { 0o700 } else { 0o600 })
-            .open(&tmp)
+        let mut file = crate::platform::create_private_file(&tmp, executable)
             .map_err(|_| "无法写入临时文件")?;
         file.write_all(bytes).map_err(|_| "写入文件失败")?;
         file.sync_all().map_err(|_| "同步文件失败")?;
@@ -81,13 +125,9 @@ pub fn atomic_write(path: &Path, bytes: &[u8], executable: bool) -> Result<()> {
 }
 
 pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    use std::io::Write;
     ensure_no_symlink_ancestors(path)?;
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .open(path)
+    let mut file = crate::platform::create_private_file(path, false)
         .map_err(|_| "无法创建导出文件；目标可能已存在或没有写入权限")?;
     file.write_all(bytes)
         .and_then(|_| file.sync_all())
@@ -102,7 +142,7 @@ pub fn source_snapshot(path: &Path) -> Result<Snapshot> {
 fn snapshot_inner(path: &Path, exclude_git: bool) -> Result<Snapshot> {
     if path
         .symlink_metadata()
-        .map(|m| m.file_type().is_symlink())
+        .map(|m| crate::platform::is_link(&m))
         .unwrap_or(false)
     {
         return Err("目标为符号链接：请通过原始位置管理，避免影响其他 Agent".into());
@@ -129,12 +169,14 @@ fn snapshot_inner(path: &Path, exclude_git: bool) -> Result<Snapshot> {
             .filter_entry(|e| !exclude_git || e.file_name() != ".git")
         {
             let item = item.map_err(|_| "读取目录失败")?;
-            if item.file_type().is_symlink() {
+            if crate::platform::is_link(
+                &fs::symlink_metadata(item.path()).map_err(|_| "读取文件元信息失败")?,
+            ) {
                 return Err("资源含符号链接；请导入只含普通文件的 Skill 目录".into());
             }
             if item.file_type().is_dir() {
                 if item.path() != path {
-                    directories.push(path_string(
+                    directories.push(portable_path(
                         item.path().strip_prefix(path).map_err(|_| "路径错误")?,
                     ));
                 }
@@ -153,9 +195,9 @@ fn snapshot_inner(path: &Path, exclude_git: bool) -> Result<Snapshot> {
                 return Err("资源超过限制：20 MB 或 2000 个文件".into());
             }
             entries.push(Entry {
-                path: path_string(relative),
+                path: portable_path(relative),
                 bytes: fs::read(item.path()).map_err(|_| "读取文件失败")?,
-                executable: m.permissions().mode() & 0o111 != 0,
+                executable: crate::platform::executable(&m),
             });
         }
     } else {
@@ -165,7 +207,7 @@ fn snapshot_inner(path: &Path, exclude_git: bool) -> Result<Snapshot> {
         entries.push(Entry {
             path: String::new(),
             bytes: fs::read(path).map_err(|_| "读取文件失败")?,
-            executable: meta.permissions().mode() & 0o111 != 0,
+            executable: crate::platform::executable(&meta),
         });
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -192,39 +234,55 @@ pub fn validate_snapshot(s: &Snapshot) -> Result<()> {
     for e in &s.entries {
         let p = Path::new(&e.path);
         if s.directory
-            && (e.path.is_empty()
+            && (!valid_relative(&e.path)
                 || p.is_absolute()
                 || p.components().any(|c| !matches!(c, Component::Normal(_))))
         {
             return Err("资源含非法相对路径".into());
         }
-        if !names.insert(&e.path) {
+        let key = if cfg!(windows) {
+            e.path.to_uppercase()
+        } else {
+            e.path.clone()
+        };
+        if !names.insert(key) {
             return Err("资源存在重复路径".into());
         }
         size += e.bytes.len() as u64;
     }
     for d in &s.directories {
         let p = Path::new(d);
-        if d.is_empty()
+        if !valid_relative(d)
             || p.is_absolute()
             || p.components().any(|c| !matches!(c, Component::Normal(_)))
         {
             return Err("资源含非法目录路径".into());
         }
+        let key = if cfg!(windows) {
+            d.to_uppercase()
+        } else {
+            d.clone()
+        };
+        if !names.insert(key) {
+            return Err("资源存在重复或冲突路径".into());
+        }
     }
     if s.directory {
-        let files: std::collections::BTreeSet<_> =
-            s.entries.iter().map(|e| Path::new(&e.path)).collect();
-        for p in s
-            .entries
-            .iter()
-            .map(|e| Path::new(&e.path))
-            .chain(s.directories.iter().map(Path::new))
-        {
-            if p.ancestors().skip(1).any(|a| files.contains(a))
-                || (s.directories.iter().any(|d| Path::new(d) == p) && files.contains(p))
-            {
-                return Err("文件与目录路径冲突".into());
+        let key = |p: &str| {
+            if cfg!(windows) {
+                p.to_uppercase()
+            } else {
+                p.to_string()
+            }
+        };
+        let files: std::collections::BTreeSet<_> = s.entries.iter().map(|e| key(&e.path)).collect();
+        for p in &names {
+            let mut ancestor = p.as_str();
+            while let Some((parent, _)) = ancestor.rsplit_once('/') {
+                if files.contains(parent) {
+                    return Err("文件与目录路径冲突".into());
+                }
+                ancestor = parent;
             }
         }
     }
@@ -240,7 +298,7 @@ pub fn restore(path: &Path, s: &Snapshot) -> Result<()> {
     validate_snapshot(s)?;
     if path
         .symlink_metadata()
-        .map(|m| m.file_type().is_symlink())
+        .map(|m| crate::platform::is_link(&m))
         .unwrap_or(false)
     {
         return Err("目标变成符号链接，已停止".into());
@@ -294,7 +352,7 @@ pub fn ensure_no_symlink_ancestors(p: &Path) -> Result<()> {
     for ancestor in p.ancestors() {
         if ancestor
             .symlink_metadata()
-            .map(|m| m.file_type().is_symlink())
+            .map(|m| crate::platform::is_link(&m))
             .unwrap_or(false)
         {
             return Err(format!(

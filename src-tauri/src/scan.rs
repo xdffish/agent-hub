@@ -175,23 +175,27 @@ pub fn run(hub: &Hub) -> Result<Scan> {
     let agents = AGENTS
         .iter()
         .map(|a| {
-            let (binary, app) = match *a {
-                "claude" => ("claude", "Claude Code.app"),
-                "codex" => ("codex", "Codex.app"),
-                "cursor" => ("cursor", "Cursor.app"),
-                _ => ("agy", "Antigravity.app"),
+            let binary = match *a {
+                "claude" => "claude",
+                "codex" => "codex",
+                "cursor" => "cursor",
+                _ => "agy",
             };
             let mut evidence = vec![];
-            for root in [PathBuf::from("/Applications"), home.join("Applications")] {
-                if root.join(app).exists() {
-                    evidence.push(path_string(&root.join(app)));
+            for path in crate::platform::app_candidates(a, &home) {
+                if path.exists() {
+                    evidence.push(path_string(&path));
                 }
             }
             // A CLI path is evidence only; no executable is run during scanning.
             if let Some(paths) = std::env::var_os("PATH") {
                 for p in std::env::split_paths(&paths) {
-                    if p.join(binary).is_file() {
-                        evidence.push(path_string(&p.join(binary)));
+                    if let Some(path) = crate::platform::executable_names(binary)
+                        .iter()
+                        .map(|n| p.join(n))
+                        .find(|p| p.is_file())
+                    {
+                        evidence.push(path_string(&path));
                         break;
                     }
                 }
@@ -277,7 +281,7 @@ pub fn run(hub: &Hub) -> Result<Scan> {
                             .map(|ids| ids[0].clone())
                     })
                     .or_else(|| library_index.get(&fp).cloned());
-                resources.push(Resource {id:rid,kind:"skill".into(),name,description,path,canonical:path_string(&resolved),is_link:fs::symlink_metadata(folder).is_ok_and(|m| m.file_type().is_symlink()),scope:scope.clone(),agents:agent_ids.clone(),fingerprint:fp,changed,library_id,detail:"已发现文件；具体加载状态、依赖和平台专属指令需在 Agent 中确认。旧兼容目录按候选来源展示。".into()});
+                resources.push(Resource {id:rid,kind:"skill".into(),name,description,path,canonical:path_string(&resolved),is_link:fs::symlink_metadata(folder).is_ok_and(|m| crate::platform::is_link(&m)),scope:scope.clone(),agents:agent_ids.clone(),fingerprint:fp,changed,library_id,detail:"已发现文件；具体加载状态、依赖和平台专属指令需在 Agent 中确认。旧兼容目录按候选来源展示。".into()});
             }
         }
         for agent in AGENTS {
@@ -370,6 +374,7 @@ pub fn run(hub: &Hub) -> Result<Scan> {
     );
     resources.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(Scan {
+        platform: std::env::consts::OS.into(),
         agents,
         resources,
         library: settings.library,

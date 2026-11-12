@@ -135,6 +135,7 @@ export type Resource_Serialize = {
 export type Scan = Scan_Serialize | Scan_Deserialize;
 
 export type Scan_Deserialize = {
+	platform: string,
 	agents: Agent[],
 	resources: Resource_Deserialize[],
 	library: Skill_Deserialize[],
@@ -145,6 +146,7 @@ export type Scan_Deserialize = {
 };
 
 export type Scan_Serialize = {
+	platform: string,
 	agents: Agent[],
 	resources: Resource_Serialize[],
 	library: Skill_Serialize[],

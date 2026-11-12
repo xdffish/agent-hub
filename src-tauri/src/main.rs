@@ -6,6 +6,7 @@ mod files;
 mod ipc;
 mod mcp;
 mod model;
+mod platform;
 mod registry;
 mod scan;
 mod toggles;

@@ -182,7 +182,18 @@ const compatibilityRows = [
 ];
 const time = (s: string) =>
   new Date(Number(s) * 1000).toLocaleString("zh-CN", { hour12: false });
-const shortPath = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
+const shortPath = (p: string) =>
+  p
+    .replaceAll("\\", "/")
+    .replace(/^(?:[A-Za-z]:)?\/(?:Users|home)\/[^/]+/i, "~");
+const pathName = (p: string) => p.replaceAll("\\", "/").split("/").pop();
+const platformName = (platform?: string) =>
+  (
+    ({ macos: "macOS", windows: "Windows", linux: "Linux" }) as Record<
+      string,
+      string
+    >
+  )[platform ?? ""] ?? "本机";
 type View =
   | "overview"
   | "resources"
@@ -498,7 +509,7 @@ function App() {
           </span>
           <div>
             <b>我的工作空间</b>
-            <small>本机 · macOS</small>
+            <small>本机 · {platformName(data?.platform)}</small>
           </div>
           <LockKeyhole size={13} className="muted" />
         </div>
@@ -597,7 +608,7 @@ function App() {
               }}
             >
               <Folder size={16} />
-              <span className="ellipsis">{p.split("/").pop()}</span>
+              <span className="ellipsis">{pathName(p)}</span>
             </button>
           ))}
           {!data?.projects.length && (
@@ -761,7 +772,10 @@ function App() {
               </div>
               <div className="section-heading">
                 <h2>
-                  你的 Agents <span className="badge neutral">macOS</span>
+                  你的 Agents{" "}
+                  <span className="badge neutral">
+                    {platformName(data?.platform)}
+                  </span>
                 </h2>
                 <button className="text-button" onClick={() => showResources()}>
                   查看全部 Skills
@@ -958,7 +972,7 @@ function App() {
                       </option>
                       {data?.projects.map((p) => (
                         <option value={p} key={p}>
-                          {p.split("/").pop()}
+                          {pathName(p)}
                           {kind === "skill" ? " + 用户级候选" : ""}
                         </option>
                       ))}
@@ -1921,7 +1935,7 @@ function ResourceLocations({
                 <small>
                   {root.kind === "skill"
                     ? "实际目录"
-                    : `文件：${canonical.split("/").pop()}`}
+                    : `文件：${pathName(canonical)}`}
                   {groups.size > 1 ? " · 独立副本" : ""}
                 </small>
                 {entries.some((r) => r.path === canonical) && (

@@ -9,7 +9,7 @@
 
 核心问题是资源散落、重复安装、版本不一致，以及不知道哪个 Agent 实际配置了哪些资源。现有社区讨论能支持痛点存在，尚不能证明多数用户都有该需求或愿意付费。
 
-第一版平台为 macOS，目标接入 Claude Code、Codex、Cursor、Antigravity。具体读写能力以[官方资料兼容性调查](research/agent-compatibility.md)为准。配置可解析、资源已安装、Agent 已加载和运行可用是不同状态，不得混为一谈。
+目标平台为 macOS、Windows 和 Linux，接入 Claude Code、Codex、Cursor、Antigravity。初版在 macOS 开发，三平台适配与验证进度见 [cross-platform.md](cross-platform.md)。具体读写能力以[官方资料兼容性调查](research/agent-compatibility.md)为准。配置可解析、资源已安装、Agent 已加载和运行可用是不同状态，不得混为一谈。
 
 ## 已确认的产品决策
 

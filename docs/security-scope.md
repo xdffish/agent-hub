@@ -4,7 +4,9 @@
 
 ## Capability → 命令 → 资源矩阵
 
-所有 capability 均明确限制为本地 `main` 窗口、macOS，无远程 URL 授权。自定义命令由同一份 `src-tauri/src/registry.rs` 清单注册并生成 `allow-*` / `deny-*` 权限，不依赖默认开放的应用命令行为。
+所有 capability 均明确限制为 macOS、Windows 和 Linux 的本地 `main` 窗口，无远程 URL 授权。自定义命令由同一份 `src-tauri/src/registry.rs` 清单注册并生成 `allow-*` / `deny-*` 权限，不依赖默认开放的应用命令行为。
+
+2026-11-12 跨平台调整：macOS/Linux 延续 Unix 私有目录与文件权限，Windows 使用当前用户和 SYSTEM 的受保护 DACL；Windows 路径授权同时拒绝 junction 等 reparse point。MCP 和 Git 临时进程在 Unix 上使用进程组，在 Windows 上先挂起启动、加入 Job Object 后恢复，操作完成或超时后清理进程树。完整验证进度见 [cross-platform.md](cross-platform.md)。
 
 | Capability | 允许命令 | 后端资源范围与确认 |
 | --- | --- | --- |

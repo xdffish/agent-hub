@@ -14,6 +14,148 @@ fn hub_at(path: &Path) -> Hub {
 }
 
 #[test]
+fn portable_snapshots_preserve_nested_paths_and_replace_existing_files() {
+    let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let source = dir.path().join("source");
+    fs::create_dir_all(source.join("nested/empty")).unwrap();
+    fs::write(source.join("SKILL.md"), "demo").unwrap();
+    fs::write(source.join("nested/file.txt"), "first").unwrap();
+    let snap = snapshot(&source).unwrap();
+    assert!(snap.entries.iter().any(|e| e.path == "nested/file.txt"));
+    assert!(snap.directories.iter().any(|d| d == "nested/empty"));
+    let target = dir.path().join("target");
+    restore(&target, &snap).unwrap();
+    assert!(snapshot(&target).unwrap() == snap);
+    atomic_write(&target.join("SKILL.md"), b"replacement", false).unwrap();
+    assert_eq!(
+        fs::read_to_string(target.join("SKILL.md")).unwrap(),
+        "replacement"
+    );
+    assert!(checked_path(&path_string(&target.join("../escape"))).is_err());
+}
+
+#[test]
+fn exchange_paths_reject_windows_devices_streams_and_traversal() {
+    for path in [
+        "../escape",
+        "C:/escape",
+        "a\\..\\escape",
+        "a:stream",
+        "NUL",
+        "CONIN$",
+        "con .txt",
+        "con.txt",
+        "COM1.log",
+        "LPT9",
+        "trailing.",
+        "trailing ",
+        "a//b",
+        "a/./b",
+    ] {
+        let mut snap = file_snapshot("test".into());
+        snap.directory = true;
+        snap.entries[0].path = path.into();
+        assert!(validate_snapshot(&snap).is_err(), "{path}");
+    }
+    for name in ["NUL", "con", "LPT1", "COM2.txt", "demo."] {
+        assert!(valid_name(name).is_err(), "{name}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_snapshots_reject_case_aliases_and_file_ancestor_conflicts() {
+    let mut snap = file_snapshot("test".into());
+    snap.directory = true;
+    snap.entries[0].path = "A".into();
+    snap.entries.push(Entry {
+        path: "a/child".into(),
+        bytes: vec![],
+        executable: false,
+    });
+    assert!(validate_snapshot(&snap).is_err());
+    snap.entries[1].path = "a".into();
+    assert!(validate_snapshot(&snap).is_err());
+}
+
+#[test]
+fn process_tree_fixture() {
+    use std::io::Write;
+    let Ok(mode) = std::env::var("AGENT_HUB_PROCESS_FIXTURE") else {
+        return;
+    };
+    let heartbeat = std::env::var_os("AGENT_HUB_HEARTBEAT").unwrap();
+    if mode == "parent" {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::process_tree_fixture", "--nocapture"])
+            .env("AGENT_HUB_PROCESS_FIXTURE", "child")
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        for _ in 0..500 {
+            if Path::new(&heartbeat).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        println!("READY:{}", child.id());
+        std::io::stdout().flush().unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+    for tick in 0u64.. {
+        fs::write(&heartbeat, tick.to_string()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn process_tree_cleanup_stops_descendants() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let heartbeat = dir.path().join("heartbeat");
+            let mut cmd = tokio::process::Command::new(std::env::current_exe().unwrap());
+            cmd.args(["--exact", "tests::process_tree_fixture", "--nocapture"])
+                .env("AGENT_HUB_PROCESS_FIXTURE", "parent")
+                .env("AGENT_HUB_HEARTBEAT", &heartbeat)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null());
+            let (mut child, tree) = crate::platform::spawn(&mut cmd).unwrap();
+            let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                while let Some(line) = lines.next_line().await.unwrap() {
+                    if line.starts_with("READY:") {
+                        return;
+                    }
+                }
+                panic!("fixture exited without readiness");
+            })
+            .await
+            .unwrap();
+            assert!(heartbeat.exists());
+            drop(tree);
+            tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            let stopped = fs::read(&heartbeat).unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            assert_eq!(
+                fs::read(heartbeat).unwrap(),
+                stopped,
+                "descendant survived tree cleanup"
+            );
+        });
+}
+
+#[test]
 fn external_change_prevents_all_writes() {
     let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let hub = hub_at(dir.path());
@@ -72,11 +214,14 @@ fn apply_keeps_private_preimage_and_restores_files_and_empty_directories() {
         .unwrap()
         .join("backups")
         .join(format!("{}.json", plan.id));
-    use std::os::unix::fs::PermissionsExt;
-    assert_eq!(
-        fs::metadata(&backup).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&backup).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
     let saved: Plan = serde_json::from_slice(&fs::read(backup).unwrap()).unwrap();
     assert!(saved.changes[0].before == before);
     let undo = hub
@@ -96,6 +241,7 @@ fn apply_keeps_private_preimage_and_restores_files_and_empty_directories() {
     assert!(target.join("empty").is_dir());
 }
 
+#[cfg(unix)]
 #[test]
 fn path_traversal_and_symlinks_are_rejected() {
     let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
@@ -247,10 +393,13 @@ fn unapproved_paths_and_cross_purpose_grants_are_denied() {
     assert!(hub.require_grant(PathPurpose::Export, &source).is_err());
     let outside = dir.path().join("outside");
     fs::create_dir(&outside).unwrap();
-    std::os::unix::fs::symlink(&outside, source.join("escape")).unwrap();
-    assert!(hub
-        .require_grant(PathPurpose::Source, &source.join("escape/secret"))
-        .is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&outside, source.join("escape")).unwrap();
+        assert!(hub
+            .require_grant(PathPurpose::Source, &source.join("escape/secret"))
+            .is_err());
+    }
     assert!(hub.require_grant(PathPurpose::Source, &outside).is_err());
 }
 
@@ -315,6 +464,7 @@ fn library_metadata_cannot_redirect_reads_and_remote_http_requires_tls() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn canonical_skill_fingerprints_are_read_once_per_scan() {
     let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
@@ -371,8 +521,24 @@ fn custom_commands_are_allowed_only_for_local_main_webview() {
         headers: Default::default(),
         invoke_key: tauri::test::INVOKE_KEY.into(),
     };
-    assert!(tauri::test::get_ipc_response(&main, request("tauri://localhost")).is_ok());
-    assert!(tauri::test::get_ipc_response(&other, request("tauri://localhost")).is_err());
+    assert!(tauri::test::get_ipc_response(
+        &main,
+        request(if cfg!(windows) {
+            "http://tauri.localhost"
+        } else {
+            "tauri://localhost"
+        })
+    )
+    .is_ok());
+    assert!(tauri::test::get_ipc_response(
+        &other,
+        request(if cfg!(windows) {
+            "http://tauri.localhost"
+        } else {
+            "tauri://localhost"
+        })
+    )
+    .is_err());
     assert!(tauri::test::get_ipc_response(&main, request("https://example.invalid")).is_err());
 }
 
@@ -387,6 +553,10 @@ fn capabilities_cover_exactly_the_registered_application_commands() {
         }
         let v: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
         assert_eq!(v["windows"], serde_json::json!(["main"]));
+        assert_eq!(
+            v["platforms"],
+            serde_json::json!(["macOS", "windows", "linux"])
+        );
         assert!(v.get("remote").is_none());
         for permission in v["permissions"].as_array().unwrap() {
             actual.insert(permission.as_str().unwrap().to_string());
@@ -416,7 +586,7 @@ fn export_creation_never_overwrites_and_mcp_environment_is_restricted() {
     fs::write(&path, "user data").unwrap();
     assert!(write_new(&path, b"replacement").is_err());
     assert_eq!(fs::read_to_string(&path).unwrap(), "user data");
-    let mut command = tokio::process::Command::new("/usr/bin/env");
+    let mut command = tokio::process::Command::new("unused-test-command");
     command.env("AGENT_HUB_TEST_SECRET", "never inherit");
     crate::mcp::limited_environment(&mut command);
     assert!(!command
@@ -436,7 +606,15 @@ fn export_creation_never_overwrites_and_mcp_environment_is_restricted() {
         "XDG_CONFIG_HOME",
         "XDG_CACHE_HOME",
         "XDG_DATA_HOME",
-        "SYSTEMROOT"
+        "SYSTEMROOT",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "WINDIR"
     ]
     .iter()
     .any(|allowed| key == *allowed)));
@@ -521,6 +699,7 @@ fn audit_remove_skill_preserves_management_copy_and_supports_undo() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn audit_link_entry_removal_is_rejected_without_deleting_source() {
     use tauri::Manager;
@@ -551,6 +730,7 @@ fn audit_link_entry_removal_is_rejected_without_deleting_source() {
     assert!(source.join("SKILL.md").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn audit_shared_source_removal_must_warn_linked_consumers() {
     use tauri::Manager;

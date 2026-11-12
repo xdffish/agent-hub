@@ -1,54 +1,107 @@
 # Agent Hub
 
-面向同时使用多个 Coding Agent 的个人开发者，在 macOS 集中盘点和管理 Skills、MCP 配置及插件。
+集中管理 Claude Code、Codex、Cursor 和 Antigravity 的 Skills、MCP 配置及本地插件清单，面向 macOS、Windows 和 Linux。
 
-Tauri 2 + React + TypeScript + Rust 构建的本机桌面工具。第一版已实现扫描、共享 Skill 库、变更预览、备份撤销、基础 MCP 配置与连接检查，以及插件清单识别。
+Agent Hub 读取各工具的本地配置，将分散在不同目录中的资源汇总到一个桌面界面。你可以维护共享 Skill 库、按项目分配 Skills、编辑 MCP 基础配置，并在写入前查看差异。
 
-## 运行
+## 功能
 
-需要 Node.js、Rust 和 macOS Xcode Command Line Tools。
+- **资源浏览**：扫描已知的全局配置目录，以及手动添加的项目目录。
+- **Skill 管理**：从本地目录或 HTTPS Git 仓库导入，记录来源与版本，支持固定版本、检查更新和按目标分配。
+- **MCP 配置**：按各工具的格式读写基础配置，保留已有凭据和扩展字段，支持手动检查 stdio 与 HTTP 连接。
+- **变更记录**：资源文件变更前展示差异并保存备份，支持撤销；目标文件已被其他程序修改时，阻止直接覆盖。
+- **插件清单**：展示已知目录中的插件声明，并提供对应工具的官方管理文档入口。
+- **导入导出**：迁移共享 Skill 库、来源、版本和分配参考，不包含 MCP 配置或 OAuth 凭据。
+
+资源出现在清单中，表示已发现对应文件。是否已安装、启用或加载，仍需在对应工具中确认。各工具的配置格式和加载规则存在差异，兼容范围见 [兼容性说明](docs/research/agent-compatibility.md)。
+
+## 从源码运行
+
+本项目使用 Tauri 2、React 19、TypeScript 和 Rust。三平台适配与验证进度见 [平台说明](docs/cross-platform.md)。
+
+准备以下环境：
+
+- Node.js 与 npm
+- Rust 工具链
+
+另外需要安装对应平台的构建依赖：
+
+| 平台    | 构建依赖                                             |
+| ------- | ---------------------------------------------------- |
+| macOS   | Xcode Command Line Tools                             |
+| Windows | Visual Studio C++ Build Tools、Windows SDK、WebView2 |
+| Linux   | WebKitGTK 4.1、GTK 3 等系统库                        |
+
+各系统的安装步骤见 [Tauri 环境准备](https://v2.tauri.app/start/prerequisites/)。从 Git 导入 Skills 还需要安装 Git。
+
+在项目根目录执行：
 
 ```bash
 npm ci
 npm run tauri dev
 ```
 
-构建本机应用：
+## 构建
 
 ```bash
 npm run tauri build
 ```
 
-开发构建可使用 `npm run tauri build -- --debug`，产物位于 `src-tauri/target/debug/bundle/macos/Agent Hub.app`。本地构建未配置 Apple Developer 签名、公证和分发更新。
+安装包输出至 `src-tauri/target/release/bundle/`：
 
-## 当前能力
+| 平台    | 安装包                      |
+| ------- | --------------------------- |
+| macOS   | `.app`、`.dmg`              |
+| Windows | NSIS `.exe`、WiX `.msi`     |
+| Linux   | `.deb`、`.rpm`、`.AppImage` |
 
-- 只读盘点 Claude Code、Codex、Cursor、Antigravity 的已知全局位置及主动添加的项目。
-- 从本地目录或 HTTPS Git 仓库导入 Skill；保留来源、版本，支持固定版本、检查更新与按目标分配。
-- 所有资源文件写入先预览，再应用；重新核对目标快照、保存私有备份，支持撤销与失败恢复预览。
-- 项目、来源和备份文件通过原生选择器授权；应用变更、Git 拉取和 MCP 检查还需原生确认，前端不能单凭绝对路径取得权限。
-- 无凭据 MCP 基础配置按各 Agent 格式写入；保留同名项中的原生凭据与扩展字段。按需执行 stdio / HTTP 初始化检查。
-- 插件目录发现与官方原生管理文档入口；发现 manifest 不表示插件已安装或启用。
-- 导出、导入 Skill 共享库和分配参考，导入后核对本机路径再分配；不导出 MCP 配置或 OAuth 凭据。
+各平台安装包需在对应系统上构建。仓库提供 [三平台检查](.github/workflows/check.yml) 和 [安装包构建](.github/workflows/release.yml) 工作流；CI 的 Windows 产物采用 NSIS 安装包。
 
-应用数据位于 `~/Library/Application Support/dev.agenthub.desktop`，目录权限为 0700，备份文件为 0600。配置备份可能含原有秘密；Skill 内容也需用户自行检查，应用只能拦截常见凭据文件名。
-
-## 开发检查
+如需调试构建：
 
 ```bash
-npm run build
-npm run bindings
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+npm run tauri build -- --debug
 ```
 
-Rust 检查使用临时目录验证快照、覆盖冲突、撤销、凭据隐藏和配置字段保留，不修改真实 Agent 配置。
+调试产物位于 `src-tauri/target/debug/bundle/`。指定 `--target` 后，产物位于对应目标架构的目录中。当前未配置代码签名、macOS 公证或自动更新。
 
-- [产品说明与验收标准](docs/product-spec.md)
-- [四种 Agent 的官方资料兼容性调查](docs/research/agent-compatibility.md)
-- [实现范围、验证结果与限制](docs/implementation.md)
-- [命令权限、路径范围与 IPC 契约](docs/security-scope.md)
-- [本地 Skill 规范补齐清单](docs/hardening-plan.md)
+## 本地数据与备份
 
-Agent 能力随版本变化；路径发现与写入成功不能替代原生加载和连接确认。详见兼容性调查与实现记录。
+应用数据保存在当前用户的数据目录：
+
+| 平台    | 默认路径                                                    |
+| ------- | ----------------------------------------------------------- |
+| macOS   | `~/Library/Application Support/dev.agenthub.desktop`        |
+| Windows | `%LOCALAPPDATA%\dev.agenthub.desktop`                       |
+| Linux   | `~/.local/share/dev.agenthub.desktop`，遵循 `XDG_DATA_HOME` |
+
+项目目录、Skill 来源和导入文件通过系统文件选择器添加。资源文件写入前需确认变更；Git 获取和 MCP 连接检查也需手动确认。
+
+macOS 和 Linux 使用 `0700` 数据目录及 `0600` 备份文件；Windows 使用仅允许当前用户和 SYSTEM 访问的受限 ACL。配置备份可能包含原有凭据，请妥善保管。Skill 导入会拦截常见凭据文件名，但无法检查内容中包含的所有敏感信息。
+
+## 开发
+
+| 命令                                                        | 用途                                 |
+| ----------------------------------------------------------- | ------------------------------------ |
+| `npm run build`                                             | TypeScript 检查与前端构建            |
+| `npm run bindings`                                          | 生成 Rust 命令对应的 TypeScript 绑定 |
+| `npm run format`                                            | 格式化前端代码与配置                 |
+| `cargo check --manifest-path src-tauri/Cargo.toml`          | Rust 编译检查                        |
+| `cargo test --manifest-path src-tauri/Cargo.toml`           | 运行 Rust 测试                       |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Rust 格式检查                        |
+
+修改 Rust 命令接口后，运行 `npm run bindings` 更新绑定。使用 `npm run release` 同步版本号，并选择本机构建或查看三平台打包步骤。推送版本标签会触发安装包构建，产物保存在 Actions artifacts 中。
+
+## 文档
+
+- [产品说明](docs/product-spec.md)
+- [Agent 兼容性说明](docs/research/agent-compatibility.md)
+- [实现与验证记录](docs/implementation.md)
+- [文件访问与命令权限](docs/security-scope.md)
+- [跨平台适配与验证](docs/cross-platform.md)
+
+## 许可证
+
+本项目原创代码采用 [MIT License](LICENSE)。Copyright © 2026 xdffish。
+
+第三方 Skills、依赖、字体和图片沿用各自的许可证及版权声明，不适用本项目的 MIT 授权。第三方内容的授权核对尚未完成。

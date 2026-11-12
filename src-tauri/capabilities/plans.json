@@ -2,7 +2,7 @@
   "identifier": "plans",
   "description": "Resource plans, version metadata and explicitly selected backup files",
   "windows": ["main"],
-  "platforms": ["macOS"],
+  "platforms": ["macOS", "windows", "linux"],
   "local": true,
   "permissions": [
     "allow-import-skill",

@@ -2,7 +2,7 @@
   "identifier": "default",
   "description": "Read-only inventory and history in the bundled main window",
   "windows": ["main"],
-  "platforms": ["macOS"],
+  "platforms": ["macOS", "windows", "linux"],
   "local": true,
   "permissions": [
     "allow-scan",

@@ -2,7 +2,7 @@
   "identifier": "paths",
   "description": "Native path selection and project scope management",
   "windows": ["main"],
-  "platforms": ["macOS"],
+  "platforms": ["macOS", "windows", "linux"],
   "local": true,
   "permissions": [
     "allow-choose-path",

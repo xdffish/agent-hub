@@ -44,6 +44,7 @@ pub struct Agent {
 
 #[derive(Clone, Serialize, specta::Type)]
 pub struct Scan {
+    pub platform: String,
     pub agents: Vec<Agent>,
     pub resources: Vec<Resource>,
     pub library: Vec<Skill>,

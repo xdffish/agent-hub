@@ -53,8 +53,12 @@ export function candidateAssessment(
   if (agent === "antigravity")
     return "先确认 App / CLI / IDE 及 manifest；再按对应规则分析";
   if (context === "all") return "未选定项目上下文，暂不比较跨项目优先级";
-  const native = rows.filter((r) => r.path.includes("/.claude/skills/"));
-  const names = new Set(native.map((r) => r.path.split("/").pop()));
+  const native = rows.filter((r) =>
+    r.path.replaceAll("\\", "/").includes("/.claude/skills/"),
+  );
+  const names = new Set(
+    native.map((r) => r.path.replaceAll("\\", "/").split("/").pop()),
+  );
   if (names.size > 1)
     return "frontmatter 同名但目录名不同；不能按此分组判定覆盖";
   if (

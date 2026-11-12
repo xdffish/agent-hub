@@ -31,17 +31,6 @@ fn resolve(value: &str) -> Result<String> {
     }
     Err("环境变量引用层数过多".into())
 }
-struct ProcessGroup(i32);
-impl Drop for ProcessGroup {
-    fn drop(&mut self) {
-        if self.0 > 0 {
-            unsafe {
-                libc::kill(-self.0, libc::SIGKILL);
-            }
-        }
-    }
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn check_mcp(
@@ -89,7 +78,34 @@ async fn check(config: Value) -> Result<String> {
         return Err("此配置使用原生鉴权或 helper，请在所属 Agent 中完成连接检查；本工具不会读取 OAuth 存储或执行凭据 helper".into());
     }
     if let Some(command) = config.get("command").and_then(Value::as_str) {
-        let mut cmd = tokio::process::Command::new(resolve(command)?);
+        let cwd = config
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(resolve)
+            .transpose()?
+            .map(std::path::PathBuf::from);
+        let configured_path = config
+            .get("env")
+            .and_then(Value::as_object)
+            .and_then(|map| {
+                map.iter().find(|(k, _)| {
+                    if cfg!(windows) {
+                        k.eq_ignore_ascii_case("PATH")
+                    } else {
+                        k.as_str() == "PATH"
+                    }
+                })
+            })
+            .map(|(_, v)| resolve(v.as_str().ok_or("env 必须为字符串映射")?))
+            .transpose()?;
+        let search_path = configured_path
+            .map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("PATH"));
+        let mut cmd = tokio::process::Command::new(crate::platform::command_path(
+            &resolve(command)?,
+            cwd.as_deref(),
+            search_path.as_deref(),
+        ));
         limited_environment(&mut cmd);
         if let Some(args) = config.get("args").and_then(Value::as_array) {
             for arg in args {
@@ -101,19 +117,15 @@ async fn check(config: Value) -> Result<String> {
                 cmd.env(key, resolve(value.as_str().ok_or("env 必须为字符串映射")?)?);
             }
         }
-        if let Some(cwd) = config.get("cwd").and_then(Value::as_str) {
-            cmd.current_dir(resolve(cwd)?);
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
         }
-        use std::os::unix::process::CommandExt;
-        cmd.as_std_mut().process_group(0);
-        let mut child = cmd
-            .stdin(Stdio::piped())
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|_| "无法启动 MCP 进程，请检查命令路径与运行环境")?;
-        let _group = ProcessGroup(child.id().unwrap_or(0) as i32);
+            .kill_on_drop(true);
+        let (mut child, _group) = crate::platform::spawn(&mut cmd)
+            .map_err(|_| "无法启动或隔离 MCP 进程，请检查命令路径与运行环境")?;
         let mut input = child.stdin.take().ok_or("无法打开进程输入")?;
         input
             .write_all(format!("{}\n", initialize()).as_bytes())
@@ -285,6 +297,14 @@ pub(crate) fn limited_environment(cmd: &mut tokio::process::Command) {
         "XDG_CACHE_HOME",
         "XDG_DATA_HOME",
         "SYSTEMROOT",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "WINDIR",
     ] {
         if let Some(value) = std::env::var_os(key) {
             cmd.env(key, value);
