@@ -1,6 +1,6 @@
 [package]
 name = "agent-hub"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2021"
 license = "MIT"
 description = "Desktop manager for coding agent skills, MCP configuration and plugins"
