@@ -31,7 +31,8 @@ fn portable_snapshots_preserve_nested_paths_and_replace_existing_files() {
         fs::read_to_string(target.join("SKILL.md")).unwrap(),
         "replacement"
     );
-    assert!(checked_path(&path_string(&target.join("../escape"))).is_err());
+    let traversal = format!("{}\\..\\escape", path_string(&target));
+    assert!(checked_path(&traversal).is_err());
 }
 
 #[test]
