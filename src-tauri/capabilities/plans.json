@@ -1,0 +1,20 @@
+{
+  "identifier": "plans",
+  "description": "Resource plans, version metadata and explicitly selected backup files",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "local": true,
+  "permissions": [
+    "allow-import-skill",
+    "allow-deploy-skill",
+    "allow-remove-resource",
+    "allow-delete-skill",
+    "allow-pin-skill",
+    "allow-check-update",
+    "allow-preview-mcp",
+    "allow-preview-toggle",
+    "allow-preview-undo",
+    "allow-export-library",
+    "allow-import-library"
+  ]
+}

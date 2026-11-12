@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "description": "Read-only inventory and history in the bundled main window",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "local": true,
+  "permissions": [
+    "allow-scan",
+    "allow-history",
+    "allow-plugin-guide",
+    "allow-toggle-states",
+    "core:app:allow-version"
+  ]
+}

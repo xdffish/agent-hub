@@ -1,0 +1,8 @@
+{
+  "identifier": "apply",
+  "description": "Apply backend-held plans after native confirmation",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "local": true,
+  "permissions": ["allow-apply-plan"]
+}

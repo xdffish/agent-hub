@@ -1,0 +1,13 @@
+{
+  "identifier": "paths",
+  "description": "Native path selection and project scope management",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "local": true,
+  "permissions": [
+    "allow-choose-path",
+    "allow-add-project",
+    "allow-remove-project",
+    "allow-reveal-resource"
+  ]
+}
