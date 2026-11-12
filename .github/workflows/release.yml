@@ -9,6 +9,10 @@ on:
         description: Existing version tag to build (for example v1.0.3)
         required: true
         type: string
+      artifacts_run_id:
+        description: Reuse build artifacts from a successful workflow run
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -42,9 +46,11 @@ jobs:
           }
           NODE
   check:
+    if: ${{ inputs.artifacts_run_id == '' }}
     uses: ./.github/workflows/check.yml
 
   package:
+    if: ${{ inputs.artifacts_run_id == '' }}
     needs: [check, validate-release]
     strategy:
       fail-fast: false
@@ -97,16 +103,20 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: package
+    needs: [package, validate-release]
+    if: ${{ always() && needs.validate-release.result == 'success' && (needs.package.result == 'success' || inputs.artifacts_run_id != '') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: agent-hub-*
           path: release-assets
           merge-multiple: true
+          run-id: ${{ inputs.artifacts_run_id || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
