@@ -182,10 +182,20 @@ const compatibilityRows = [
 ];
 const time = (s: string) =>
   new Date(Number(s) * 1000).toLocaleString("zh-CN", { hour12: false });
-const shortPath = (p: string) =>
+const slashPath = (p: string) =>
   p
     .replaceAll("\\", "/")
-    .replace(/^(?:[A-Za-z]:)?\/(?:Users|home)\/[^/]+/i, "~");
+    .replace(/^\/\/\?\/UNC\//i, "//")
+    .replace(/^\/\/\?\//, "");
+const pathIdentity = (p: string, windows: boolean) => {
+  const normalized = slashPath(p).replace(/\/+$/, "");
+  const path = /^[A-Za-z]:$/i.test(normalized)
+    ? `${normalized}/`
+    : normalized || "/";
+  return windows ? path.toLocaleLowerCase("en-US") : path;
+};
+const shortPath = (p: string) =>
+  slashPath(p).replace(/^(?:[A-Za-z]:)?\/(?:Users|home)\/[^/]+/i, "~");
 const pathName = (p: string) => p.replaceAll("\\", "/").split("/").pop();
 const platformName = (platform?: string) =>
   (
@@ -855,6 +865,7 @@ function App() {
               <SkillInventory
                 controls={nativeControls}
                 agentFilter="all"
+                windows={data?.platform === "windows"}
                 onToggle={toggleResource}
                 busy={!!busy}
                 rows={resources.filter((r) => r.kind === "skill")}
@@ -1004,6 +1015,7 @@ function App() {
                     <SkillInventory
                       controls={nativeControls}
                       agentFilter={agent}
+                      windows={data?.platform === "windows"}
                       onToggle={toggleResource}
                       busy={!!busy}
                       rows={filtered}
@@ -1405,13 +1417,20 @@ function App() {
               <div className="drawer-section-heading">
                 <h3>文件位置</h3>
                 <span>
-                  {new Set(detailLocations.map((r) => r.canonical)).size} 份文件
-                  / {detailLocations.length} 个入口
+                  {
+                    new Set(
+                      detailLocations.map((r) =>
+                        pathIdentity(r.canonical, data?.platform === "windows"),
+                      ),
+                    ).size
+                  }{" "}
+                  份文件 / {detailLocations.length} 个入口
                 </span>
               </div>
               <ResourceLocations
                 rows={detailLocations}
                 busy={!!busy}
+                windows={data?.platform === "windows"}
                 checks={mcpChecks}
                 onOpen={(r) =>
                   void job("打开文件或目录", async () => {
@@ -1647,7 +1666,14 @@ function App() {
               ) : selection.type === "resource" &&
                 selection.item.kind === "skill" &&
                 (selection.item.is_link ||
-                  selection.item.path !== selection.item.canonical) ? (
+                  pathIdentity(
+                    selection.item.path,
+                    data?.platform === "windows",
+                  ) !==
+                    pathIdentity(
+                      selection.item.canonical,
+                      data?.platform === "windows",
+                    )) ? (
                 <p className="native-control-hint" role="note">
                   此位置是链接或映射入口，应用内不提供删除。请通过系统文件管理器移除此链接；删除源目录会影响其他入口。
                 </p>
@@ -1867,12 +1893,14 @@ function App() {
 function ResourceLocations({
   rows,
   busy,
+  windows,
   onOpen,
   checks,
 }: {
   checks: Record<string, McpCheck>;
   rows: Resource[];
   busy: boolean;
+  windows: boolean;
   onOpen: (r: Resource) => void;
 }) {
   if (rows[0] && rows[0].kind !== "skill")
@@ -1907,14 +1935,25 @@ function ResourceLocations({
         ))}
       </div>
     );
-  const groups = new Map<string, Resource[]>();
-  for (const r of rows)
-    groups.set(r.canonical, [...(groups.get(r.canonical) ?? []), r]);
+  const groups = new Map<string, { canonical: string; entries: Resource[] }>();
+  for (const r of rows) {
+    const identity = pathIdentity(r.canonical, windows);
+    const group = groups.get(identity);
+    if (group) group.entries.push(r);
+    else groups.set(identity, { canonical: r.canonical, entries: [r] });
+  }
   return (
     <div className="location-groups">
-      {[...groups].map(([canonical, entries]) => {
-        const root = entries.find((r) => r.path === canonical) ?? entries[0];
-        const links = entries.filter((r) => r.path !== canonical);
+      {[...groups.values()].map(({ canonical, entries }) => {
+        const canonicalIdentity = pathIdentity(canonical, windows);
+        const root =
+          entries.find(
+            (r) => pathIdentity(r.path, windows) === canonicalIdentity,
+          ) ?? entries[0];
+        const links = entries.filter(
+          (r) =>
+            r.is_link || pathIdentity(r.path, windows) !== canonicalIdentity,
+        );
         return (
           <section className="location-group" key={canonical}>
             <button
@@ -1938,7 +1977,9 @@ function ResourceLocations({
                     : `文件：${pathName(canonical)}`}
                   {groups.size > 1 ? " · 独立副本" : ""}
                 </small>
-                {entries.some((r) => r.path === canonical) && (
+                {entries.some(
+                  (r) => pathIdentity(r.path, windows) === canonicalIdentity,
+                ) && (
                   <small>
                     {root.scope === "global" ? "用户级" : "项目级"} ·{" "}
                     {root.agents.map((a) => names[a]).join("、")}
@@ -1982,6 +2023,7 @@ function SkillInventory({
   rows,
   controls,
   agentFilter,
+  windows,
   onToggle,
   busy,
   library,
@@ -1992,6 +2034,7 @@ function SkillInventory({
   rows: Resource[];
   controls: NativeControl[];
   agentFilter: string;
+  windows: boolean;
   onToggle: (c: NativeControl) => void;
   busy: boolean;
   library: Skill[];
@@ -2040,7 +2083,9 @@ function SkillInventory({
       </div>
       {visible.slice(0, limit).map(([name, g]) => {
         const agents = [...new Set(g.locations.flatMap((r) => r.agents))];
-        const realPaths = new Set(g.locations.map((r) => r.canonical));
+        const realPaths = new Set(
+          g.locations.map((r) => pathIdentity(r.canonical, windows)),
+        );
         const contents = new Set(g.locations.map((r) => r.fingerprint));
         return (
           <ResourceGroupCard
