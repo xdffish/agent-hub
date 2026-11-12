@@ -2078,3 +2078,21 @@ button.native-switch.on {
   color: #85917d;
   overflow-wrap: anywhere;
 }
+
+.app-updater {
+  margin: 24px 0;
+}
+.app-updater progress {
+  width: 100%;
+  accent-color: #315b4a;
+  margin: 12px 0;
+}
+.update-notes {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}
+.app-updater summary {
+  cursor: pointer;
+  margin: 12px 0;
+}

@@ -1,3 +1,4 @@
+import { AppUpdater } from "./AppUpdater";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
@@ -715,6 +716,11 @@ function App() {
               {busy}…
             </div>
           )}
+          <AppUpdater
+            expanded={view === "settings"}
+            busy={!!busy}
+            runInstall={(action) => job("安装更新", action)}
+          />
           {view === "overview" && (
             <>
               <div className="page-heading">

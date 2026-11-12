@@ -21,13 +21,7 @@
     ],
     "security": {
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
-      "capabilities": [
-        "default",
-        "paths",
-        "plans",
-        "apply",
-        "mcp-check"
-      ]
+      "capabilities": ["default", "paths", "plans", "apply", "mcp-check"]
     }
   },
   "bundle": {
@@ -35,10 +29,18 @@
     "shortDescription": "Manage local coding agent resources",
     "active": true,
     "targets": "all",
-    "icon": [
-      "icons/icon.icns",
-      "icons/icon.ico",
-      "icons/icon.png"
-    ]
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDRDhCRjhDNkMyM0NDMjAKUldRZ3pDTnNqTC9ZN0hFcjBhWnR1ejZVRUk4Y1BPQVBnL2NRYTNkUnlDSFE3TEpDclBjL0JURisK",
+      "endpoints": [
+        "https://github.com/xdffish/agent-hub/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

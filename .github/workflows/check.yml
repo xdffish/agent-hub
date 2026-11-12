@@ -36,6 +36,7 @@ jobs:
           workspaces: src-tauri -> target
       - run: npm ci
       - run: npm run build
+      - run: node --test scripts/update-manifest.test.mjs
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - name: Test (macOS and Windows)
         if: runner.os != 'Linux'

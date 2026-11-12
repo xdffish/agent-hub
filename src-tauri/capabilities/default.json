@@ -9,6 +9,19 @@
     "allow-history",
     "allow-plugin-guide",
     "allow-toggle-states",
-    "core:app:allow-version"
+    "core:app:allow-version",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
+    "core:resources:allow-close",
+    "process:allow-restart",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/xdffish/agent-hub/releases"
+        }
+      ]
+    }
   ]
 }

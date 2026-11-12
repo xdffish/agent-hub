@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   validate-release:
@@ -45,6 +46,17 @@ jobs:
             process.exit(1);
           }
           NODE
+      - name: Verify reused artifacts belong to this version
+        if: ${{ inputs.artifacts_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_RUN: ${{ inputs.artifacts_run_id }}
+        run: |
+          [[ "$ARTIFACT_RUN" =~ ^[0-9]+$ ]]
+          test "$(gh api "repos/$GH_REPO/actions/runs/$ARTIFACT_RUN" --jq '.head_sha')" = "$(git rev-parse HEAD)"
+          gh api "repos/$GH_REPO/actions/runs/$ARTIFACT_RUN/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.name | startswith("package ("))] | length == 3 and all(.conclusion == "success")' | grep -qx true
   check:
     if: ${{ inputs.artifacts_run_id == '' }}
     uses: ./.github/workflows/check.yml
@@ -91,10 +103,15 @@ jobs:
         run: npm run tauri build -- ${{ matrix.args }}
         env:
           NO_STRIP: "true"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: agent-hub-${{ matrix.name }}
           path: |
+            src-tauri/target/**/bundle/macos/*.app.tar.gz*
+            src-tauri/target/**/bundle/nsis/*.sig
+            src-tauri/target/**/bundle/appimage/*.sig
             src-tauri/target/**/bundle/dmg/*.dmg
             src-tauri/target/**/bundle/nsis/*.exe
             src-tauri/target/**/bundle/deb/*.deb
@@ -110,6 +127,12 @@ jobs:
       contents: write
       actions: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v4
         with:
           pattern: agent-hub-*
@@ -123,18 +146,17 @@ jobs:
           RELEASE_TAG: ${{ inputs.version || github.ref_name }}
           GH_REPO: ${{ github.repository }}
         run: |
-          mapfile -d '' assets < <(find release-assets -type f -print0)
-          if ((${#assets[@]} == 0)); then
-            echo "No release assets were downloaded." >&2
-            exit 1
-          fi
-
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" \
+            flags=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" "${flags[@]}" \
               --verify-tag \
               --title "Agent Hub $RELEASE_TAG" \
               --generate-notes \
               --draft
           fi
+          gh release view "$RELEASE_TAG" --json body > "$RUNNER_TEMP/release-notes.json"
+          RELEASE_NOTES_FILE="$RUNNER_TEMP/release-notes.json" node scripts/update-manifest.mjs release-assets publish-assets
+          mapfile -d '' assets < <(find publish-assets -type f -print0)
           gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
           gh release edit "$RELEASE_TAG" --draft=false

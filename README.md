@@ -89,7 +89,15 @@ npm run tauri build
 npm run tauri build -- --debug
 ```
 
-调试产物位于 `src-tauri/target/debug/bundle/`。指定 `--target` 后，产物位于对应目标架构的目录中。当前未配置代码签名、macOS 公证或自动更新。
+调试产物位于 `src-tauri/target/debug/bundle/`。指定 `--target` 后，产物位于对应目标架构的目录中。更新包使用独立签名校验；当前未配置操作系统代码签名与 macOS 公证。
+
+## 应用更新
+
+桌面应用启动后会检查 GitHub Releases，发现新版本时显示提示。也可在「设置与备份」中手动检查。点击「下载更新」后会显示进度并校验签名；保存工作后点击「安装并重启」完成更新。网络不可用时仍可正常使用当前版本。
+
+macOS 和 Windows 支持应用内更新；Linux 的应用内更新用于 AppImage，DEB/RPM 安装请使用相应的新安装包或包管理器。v1.0.6 及更早版本没有更新器，需要手动安装一次带更新器的新版本。
+
+发布者仍使用 `npm run release`。CI 构建并签名更新包，生成 `latest.json`，在全部附件上传后公开 Release。签名私钥保存在仓库外，通过 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY` 提供；配置中的公钥用于验证更新，不能随意更换。详细维护步骤见 [更新发布说明](docs/auto-update.md)。
 
 ## 本地数据与备份
 

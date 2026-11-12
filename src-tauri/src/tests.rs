@@ -560,7 +560,15 @@ fn capabilities_cover_exactly_the_registered_application_commands() {
         );
         assert!(v.get("remote").is_none());
         for permission in v["permissions"].as_array().unwrap() {
-            actual.insert(permission.as_str().unwrap().to_string());
+            if let Some(permission) = permission.as_str() {
+                actual.insert(permission.to_string());
+            } else {
+                assert_eq!(
+                    permission,
+                    &serde_json::json!({"identifier":"opener:allow-open-url","allow":[{"url":"https://github.com/xdffish/agent-hub/releases"}]})
+                );
+                actual.insert("opener:allow-open-url".to_string());
+            }
         }
     }
     let expected: std::collections::BTreeSet<_> = crate::registry::COMMAND_NAMES
@@ -569,14 +577,25 @@ fn capabilities_cover_exactly_the_registered_application_commands() {
         .collect();
     let core_permissions: std::collections::BTreeSet<_> = actual
         .iter()
-        .filter(|permission| permission.starts_with("core:"))
+        .filter(|permission| permission.contains(':'))
         .cloned()
         .collect();
     assert_eq!(
         core_permissions,
-        std::collections::BTreeSet::from(["core:app:allow-version".to_string()])
+        std::collections::BTreeSet::from(
+            [
+                "core:app:allow-version",
+                "core:resources:allow-close",
+                "updater:allow-check",
+                "updater:allow-download",
+                "updater:allow-install",
+                "process:allow-restart",
+                "opener:allow-open-url"
+            ]
+            .map(str::to_string)
+        )
     );
-    actual.retain(|permission| !permission.starts_with("core:"));
+    actual.retain(|permission| !permission.contains(':'));
     assert_eq!(actual, expected);
 }
 
