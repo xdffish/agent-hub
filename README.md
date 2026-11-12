@@ -90,7 +90,9 @@ macOS 和 Linux 使用 `0700` 数据目录及 `0600` 备份文件；Windows 使�
 | `cargo test --manifest-path src-tauri/Cargo.toml`           | 运行 Rust 测试                       |
 | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Rust 格式检查                        |
 
-修改 Rust 命令接口后，运行 `npm run bindings` 更新绑定。使用 `npm run release` 同步版本号，并选择本机构建或查看三平台打包步骤。推送版本标签会触发安装包构建，产物保存在 Actions artifacts 中。
+修改 Rust 命令接口后，运行 `npm run bindings` 更新绑定。运行 `npm run release` 并选择 GitHub 发布后，脚本会更新版本号、创建版本提交和注释 Tag，再推送到 GitHub。CI 检查版本一致性、构建三平台安装包，并创建 GitHub Release；Release 页面会列出更新说明与可下载的安装包。预发布版本号（如 `1.1.0-beta.1`）会标记为预发布。
+
+也可以推送已有版本 Tag 触发发布；手动运行工作流时需填写已存在的版本 Tag。构建与测试必须全部通过才会创建 Release。GitHub 自动更新说明按合并的 PR 与标签生成，建议每个 PR 加上 `feature`、`bug` 或 `documentation` 标签。
 
 ## 文档
 

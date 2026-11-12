@@ -4,15 +4,48 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Existing version tag to build (for example v1.0.3)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify tag and package versions match
+        env:
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const tag = process.env.RELEASE_TAG;
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+          const cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const lock = fs.readFileSync('src-tauri/Cargo.lock', 'utf8').split('[[package]]').map(s => s.trim()).find(s => /^name\s*=\s*"agent-hub"$/m.test(s) && !/^source\s*=/m.test(s));
+          const lockVersion = lock?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+          const version = tag?.replace(/^v/, '');
+          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag ?? '') || [pkg.version, tauri.version, cargo, lockVersion].some(v => v !== version)) {
+            console.error(`Release tag ${tag} must match package, Tauri, Cargo and Cargo.lock versions.`);
+            process.exit(1);
+          }
+          NODE
   check:
     uses: ./.github/workflows/check.yml
+
   package:
-    needs: check
+    needs: [check, validate-release]
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +62,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -60,3 +95,25 @@ jobs:
             src-tauri/target/**/bundle/rpm/*.rpm
             src-tauri/target/**/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agent-hub-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --verify-tag \
+            --title "Agent Hub $RELEASE_TAG" \
+            --generate-notes

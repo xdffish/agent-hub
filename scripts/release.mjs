@@ -162,34 +162,23 @@ async function main() {
       if (customVer.trim()) targetVer = customVer.trim();
     }
 
-    if (targetVer === currentVer) {
-      console.log(`${color.dim("保持版本号不变: " + targetVer)}`);
-    }
-    updateVersions(targetVer);
-
     const host = { darwin: "macOS", win32: "Windows", linux: "Linux" }[
       process.platform
     ];
     if (!host) throw new Error(`不支持的构建主机：${process.platform}`);
     console.log(`\n${color.bold("【第 2 步】构建方式")}`);
     console.log(`  [1] 在本机上构建 ${host} 安装包`);
-    console.log("  [2] 准备 macOS、Windows、Linux 三平台 CI 打包");
+    console.log("  [2] 创建版本提交并发布三平台 GitHub Release");
     const choice = (await rl.question("请选择 [默认 1]: ")).trim() || "1";
     if (choice === "2") {
-      const workflowPath = resolve(rootDir, ".github/workflows/release.yml");
-      if (!existsSync(workflowPath))
-        throw new Error("缺少 .github/workflows/release.yml");
-      console.log("\n三平台打包配置：.github/workflows/release.yml");
-      console.log(
-        "提交变更并推送到 GitHub 后，可手动运行 Desktop packages 工作流。",
-      );
-      console.log(`也可通过推送版本标签 v${targetVer} 触发。`);
-      console.log(
-        "安装包保存在 Actions artifacts 中；工作流不会自动公开发布。",
-      );
+      publishRelease(targetVer, currentVer);
       return;
     }
     if (choice !== "1") throw new Error("请选择 1 或 2");
+    if (targetVer === currentVer) {
+      console.log(`${color.dim("保持版本号不变: " + targetVer)}`);
+    }
+    updateVersions(targetVer);
     const args = [
       resolve(rootDir, "node_modules/@tauri-apps/cli/tauri.js"),
       "build",
@@ -227,6 +216,69 @@ async function main() {
   } finally {
     rl.close();
   }
+}
+
+function git(args) {
+  const result = spawnSync("git", args, { cwd: rootDir, encoding: "utf8" });
+  if (result.error) throw result.error;
+  return result;
+}
+
+function requireGit(args, message) {
+  const result = git(args);
+  if (result.status !== 0) throw new Error(message);
+  return result.stdout.trim();
+}
+
+function publishRelease(version, currentVersion) {
+  if (version === currentVersion)
+    throw new Error("发布版本必须高于或不同于当前版本号");
+  if (!existsSync(resolve(rootDir, ".github/workflows/release.yml")))
+    throw new Error("缺少 .github/workflows/release.yml");
+
+  const status = requireGit(["status", "--porcelain"], "无法读取 Git 状态");
+  if (status) throw new Error("发布前请先提交或处理工作区中的其他改动");
+  const branch = requireGit(
+    ["branch", "--show-current"],
+    "请在 Git 分支上发布",
+  );
+  requireGit(["check-ref-format", "--branch", branch], "当前分支名称无效");
+  requireGit(["remote", "get-url", "origin"], "请先配置 origin Git 远程仓库");
+  requireGit(["var", "GIT_COMMITTER_IDENT"], "请先配置 Git 提交者姓名和邮箱");
+
+  const tag = `v${version}`;
+  if (git(["show-ref", "--verify", "--quiet", `refs/tags/${tag}`]).status === 0)
+    throw new Error(`本地 Tag 已存在：${tag}`);
+  const remoteTag = git(["ls-remote", "--tags", "origin", `refs/tags/${tag}`]);
+  if (remoteTag.status !== 0) throw new Error("无法检查 GitHub 上的版本 Tag");
+  if (remoteTag.stdout.trim())
+    throw new Error(`GitHub 上的 Tag 已存在：${tag}`);
+
+  updateVersions(version);
+  const files = [
+    "package.json",
+    "package-lock.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/Cargo.lock",
+    "src-tauri/tauri.conf.json",
+  ];
+  requireGit(["add", "--", ...files], "暂存版本文件失败");
+  requireGit(["diff", "--cached", "--check"], "版本文件格式检查失败");
+  requireGit(["commit", "-m", `chore: release ${tag}`], "版本提交失败");
+  requireGit(["tag", "-a", tag, "-m", `Agent Hub ${tag}`], "创建版本 Tag 失败");
+  requireGit(
+    [
+      "push",
+      "--atomic",
+      "origin",
+      `HEAD:refs/heads/${branch}`,
+      `refs/tags/${tag}`,
+    ],
+    `推送失败；版本提交和本地 Tag ${tag} 已创建，可检查权限后重新推送。`,
+  );
+  console.log(
+    `\n${color.green(`已推送 ${tag}。GitHub Actions 将构建安装包并发布带更新说明的 GitHub Release。`)}`,
+  );
 }
 
 main().catch((err) => {

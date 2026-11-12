@@ -38,9 +38,11 @@ Windows 不提供 Unix 可执行位，导入时会将该字段按本机语义归
 | Windows x64                              | NSIS `.exe`                 |
 | Linux x64（Ubuntu 24.04）                | `.deb`、`.rpm`、`.AppImage` |
 
-安装包工作流可手动执行，也可由 `v*` 标签触发。产物上传到 Actions artifacts，不自动创建公开 Release。当前未配置代码签名、macOS 公证或自动更新。
+推送 `v*` 标签后，工作流先核对 Tag 与 npm、Tauri、Cargo 版本，再运行三平台检查和打包。全部通过后会自动创建 GitHub Release，生成更新说明并附上五类安装包。预发布版本 Tag（例如 `v1.1.0-beta.1`）会标记为预发布。也可手动运行工作流并提供已存在的版本 Tag。Release 更新说明使用 GitHub 自动生成规则，并按 `.github/release.yml` 分类。
 
-`npm run release` 可在三个系统上同步版本并运行本机构建；通过 Node.js 直接调用 Tauri CLI，避免依赖 Unix Shell。`scripts/dev.sh` 是 macOS/Linux 的可选开发辅助脚本；Windows 使用 `npm run tauri dev`。
+当前未配置代码签名、macOS 公证或应用内自动更新。
+
+`npm run release` 可在三个系统上同步版本并运行本机构建，或创建版本提交与 Tag 并推送，触发 GitHub Release。远程发布要求干净工作区、可用的 `origin`、Git 提交者身份及 GitHub 写入权限。通过 Node.js 直接调用 Tauri CLI，避免依赖 Unix Shell。`scripts/dev.sh` 是 macOS/Linux 的可选开发辅助脚本；Windows 使用 `npm run tauri dev`。
 
 构建环境请参照 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。Windows 进程管理依据 [Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)。
 
