@@ -757,16 +757,26 @@ pub fn history(hub: State<Hub>) -> Result<Vec<History>> {
         .collect();
     let global_skills = scanner::skill_roots(&home, None);
     let mut records = hub.records()?;
+    let home_identity = path_identity(&path_string(&home));
     for record in &mut records {
         let mut projects = std::collections::BTreeSet::new();
         for path in &record.paths {
-            if globals.iter().any(|p| p == Path::new(path))
-                || global_skills
-                    .iter()
-                    .any(|(root, _)| Path::new(path).starts_with(root))
+            let identity = path_identity(path);
+            if globals
+                .iter()
+                .any(|p| path_identity(&path_string(p)) == identity)
+                || global_skills.iter().any(|(root, _)| {
+                    let root = path_identity(&path_string(root));
+                    identity == root
+                        || identity
+                            .strip_prefix(&root)
+                            .is_some_and(|rest| rest.starts_with('/'))
+                })
             {
                 continue;
             }
+            let portable = path.replace('\\', "/");
+            let prefix = portable.starts_with("//?/");
             let mut candidate: Option<&str> = None;
             for marker in [
                 "/.agents/",
@@ -775,8 +785,8 @@ pub fn history(hub: State<Hub>) -> Result<Vec<History>> {
                 "/.codex/",
                 "/.gemini/",
             ] {
-                if let Some((base, _)) = path.rsplit_once(marker) {
-                    if Path::new(base) != home && !base.is_empty() {
+                if let Some((base, _)) = portable.rsplit_once(marker) {
+                    if path_identity(base) != home_identity && !base.is_empty() {
                         if candidate.is_none_or(|old| base.len() > old.len()) {
                             candidate = Some(base);
                         }
@@ -784,7 +794,15 @@ pub fn history(hub: State<Hub>) -> Result<Vec<History>> {
                 }
             }
             if let Some(base) = candidate {
-                projects.insert(base.to_string());
+                let mut base = if cfg!(windows) {
+                    base.replace('/', "\\")
+                } else {
+                    base.to_string()
+                };
+                if cfg!(windows) && prefix && !base.starts_with("\\\\?\\") {
+                    base = format!("\\\\?\\{base}");
+                }
+                projects.insert(base);
             }
         }
         record.required_projects = projects.into_iter().collect();

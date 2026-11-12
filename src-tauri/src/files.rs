@@ -30,6 +30,21 @@ pub fn fingerprint(s: &Snapshot) -> String {
 pub fn path_string(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
+pub fn path_identity(value: &str) -> String {
+    let mut value = value.replace('\\', "/");
+    if let Some(rest) = value.strip_prefix("//?/UNC/") {
+        value = format!("//{rest}");
+    } else if let Some(rest) = value.strip_prefix("//?/") {
+        value = rest.to_string();
+    }
+    while value.len() > 1 && value.ends_with('/') {
+        value.pop();
+    }
+    if cfg!(windows) {
+        value.make_ascii_lowercase();
+    }
+    value
+}
 fn portable_path(p: &Path) -> String {
     p.components()
         .map(|c| c.as_os_str().to_string_lossy())
@@ -97,7 +112,8 @@ pub fn valid_name(name: &str) -> Result<()> {
 }
 pub fn checked_path(value: &str) -> Result<PathBuf> {
     let p = PathBuf::from(value);
-    if !p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir)) {
+    let has_parent = value.replace('\\', "/").split('/').any(|part| part == "..");
+    if !p.is_absolute() || has_parent || p.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err("请使用不含 .. 的绝对路径".into());
     }
     Ok(p)
