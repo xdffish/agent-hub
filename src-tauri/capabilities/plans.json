@@ -6,6 +6,7 @@
   "local": true,
   "permissions": [
     "allow-import-skill",
+    "allow-add-skill-to-agents",
     "allow-deploy-skill",
     "allow-remove-resource",
     "allow-delete-skill",

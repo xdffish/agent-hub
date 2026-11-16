@@ -77,7 +77,7 @@ npm run tauri build
 
 | 平台    | 安装包                      |
 | ------- | --------------------------- |
-| macOS   | `.app`、`.dmg`              |
+| macOS   | Apple Silicon（M 系列，含 M5）与 Intel 分别提供 `.app`、`.dmg` |
 | Windows | NSIS `.exe`、WiX `.msi`     |
 | Linux   | `.deb`、`.rpm`、`.AppImage` |
 

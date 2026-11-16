@@ -338,6 +338,76 @@ pub fn run(hub: &Hub) -> Result<Scan> {
             if !root.exists() {
                 continue;
             }
+            if agent == "antigravity" {
+                for plugin in fs::read_dir(&root).into_iter().flatten().flatten() {
+                    let plugin_path = plugin.path();
+                    let manifest = plugin_path.join("plugin.json");
+                    if !plugin.file_type().is_ok_and(|kind| kind.is_dir())
+                        || !manifest.is_file()
+                        || ensure_no_symlink_ancestors(&plugin_path).is_err()
+                    {
+                        continue;
+                    }
+                    let manifest_bytes = match fs::read(&manifest) {
+                        Ok(bytes) if bytes.len() < 1024 * 1024 => bytes,
+                        _ => continue,
+                    };
+                    let plugin_manifest: Value = match serde_json::from_slice(&manifest_bytes) {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    };
+                    let plugin_name = plugin_manifest
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("未命名插件");
+                    let skills_root = plugin_path.join("skills");
+                    let Ok(skill_dirs) = fs::read_dir(skills_root) else {
+                        continue;
+                    };
+                    for skill_dir in skill_dirs.flatten() {
+                        let skill_path = skill_dir.path();
+                        if !skill_dir.file_type().is_ok_and(|kind| kind.is_dir())
+                            || !skill_path.join("SKILL.md").is_file()
+                            || ensure_no_symlink_ancestors(&skill_path).is_err()
+                        {
+                            continue;
+                        }
+                        let Ok((name, description)) = skill_metadata(&skill_path) else {
+                            continue;
+                        };
+                        let canonical = match fs::canonicalize(&skill_path) {
+                            Ok(path) => path,
+                            Err(_) => continue,
+                        };
+                        let fingerprint = match fingerprints.get(&canonical) {
+                            Ok(fp) => fp,
+                            Err(_) => continue,
+                        };
+                        let path = path_string(&skill_path);
+                        let id = hash(format!("plugin-skill:{path}").as_bytes());
+                        let library_id = settings
+                            .installations
+                            .get(&path)
+                            .cloned()
+                            .or_else(|| library_index.get(&fingerprint).cloned());
+                        resources.push(Resource {
+                            id,
+                            kind: "skill".into(),
+                            name,
+                            description,
+                            path: path.clone(),
+                            canonical: path_string(&canonical),
+                            is_link: false,
+                            scope: scope.clone(),
+                            agents: vec![agent.into()],
+                            fingerprint,
+                            changed: false,
+                            library_id,
+                            detail: format!("由 Antigravity 插件「{plugin_name}」提供。插件目录由 Antigravity 管理；在 Agent Hub 中可查看内容并添加副本到其他 Agent。插件启用状态请在 Antigravity 中管理。"),
+                        });
+                    }
+                }
+            }
             for item in walkdir::WalkDir::new(&root)
                 .max_depth(6)
                 .follow_links(false)

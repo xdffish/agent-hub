@@ -201,14 +201,57 @@ pub async fn import_skill(
     source: String,
     subdir: String,
 ) -> Result<PlanView> {
+    import_skill_plan(app, hub, source, subdir, vec![]).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn add_skill_to_agents(
+    app: AppHandle,
+    hub: State<'_, Hub>,
+    source: String,
+    targets: Vec<Target>,
+) -> Result<PlanView> {
+    if targets.is_empty() {
+        return Err("请选择至少一个目标 Agent".into());
+    }
+    import_skill_plan(app, hub, source, String::new(), targets).await
+}
+
+async fn import_skill_plan(
+    app: AppHandle,
+    hub: State<'_, Hub>,
+    source: String,
+    subdir: String,
+    targets: Vec<Target>,
+) -> Result<PlanView> {
     let _operation = hub.operation();
     let (content, revision, name, description) = get_source(&app, &hub, &source, &subdir).await?;
     let _lock = hub.lock.lock().map_err(|_| "管理库忙")?;
     valid_name(&name)?;
     let mut s = hub.settings()?;
     let sid = hash(format!("{source}#{subdir}").as_bytes());
-    if s.library.iter().any(|x| x.id == sid) {
-        return Err("此来源已纳入 Agent Hub 管理，请使用检查更新".into());
+    if let Some(existing) = s.library.iter().find(|x| x.id == sid).cloned() {
+        if targets.is_empty() {
+            return Err("此来源已纳入 Agent Hub 管理，请使用检查更新".into());
+        }
+        let content = snapshot(&hub.library_path(&existing)?)?;
+        validate_skill(&content)?;
+        let mut changes = vec![];
+        let mut notes =
+            vec!["此来源已在技能库中，使用已有管理版本；如需同步来源内容，请先检查更新。".into()];
+        append_skill_targets(
+            &hub,
+            &mut s,
+            &existing.id,
+            &existing.name,
+            &content,
+            targets,
+            &mut changes,
+            &mut notes,
+        )?;
+        changes.push(hub.settings_change(&s)?);
+        return hub.queue(format!("添加到 Agent · {}", existing.name), changes, notes);
     }
     let folder = hub.root()?.join("library").join(&sid);
     s.library.push(Skill {
@@ -221,21 +264,82 @@ pub async fn import_skill(
         folder: path_string(&folder),
         subdir,
     });
-    hub.queue(
-        format!("导入 Skill · {name}"),
-        vec![
-            Change {
-                path: path_string(&folder),
-                before: snapshot(&folder)?,
-                after: content,
+    let mut changes = vec![Change {
+        path: path_string(&folder),
+        before: snapshot(&folder)?,
+        after: content,
+        sensitive: false,
+    }];
+    let mut notes = vec![
+        "仅导入 Agent Hub 管理数据，尚未安装到任何 Agent。导入过程不会执行 Skill 脚本。".into(),
+    ];
+    let title = if targets.is_empty() {
+        format!("导入 Skill · {name}")
+    } else {
+        let skill_id = s.library.last().ok_or("管理版本不存在")?.id.clone();
+        let content = changes[0].after.clone();
+        append_skill_targets(
+            &hub,
+            &mut s,
+            &skill_id,
+            &name,
+            &content,
+            targets,
+            &mut changes,
+            &mut notes,
+        )?;
+        notes[0] =
+            "同时保存到 Agent Hub 技能库，方便后续管理与更新。不会执行 Skill 附带脚本。".into();
+        format!("添加到 Agent · {name}")
+    };
+    changes.push(hub.settings_change(&s)?);
+    hub.queue(title, changes, notes)
+}
+
+fn append_skill_targets(
+    hub: &Hub,
+    settings: &mut Settings,
+    skill_id: &str,
+    name: &str,
+    content: &Snapshot,
+    targets: Vec<Target>,
+    changes: &mut Vec<Change>,
+    notes: &mut Vec<String>,
+) -> Result<()> {
+    let mut seen = std::collections::BTreeSet::new();
+    for target in targets {
+        let path = hub.target(&target, true)?.join(name);
+        notes.push(format!(
+            "{} · {} → {}",
+            scanner::display_name(&target.agent),
+            target.project.as_deref().unwrap_or("所有项目"),
+            path_string(&path)
+        ));
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        ensure_no_symlink_ancestors(&path)?;
+        let before = snapshot(&path)?;
+        if before != *content {
+            if before.exists {
+                notes.push(format!(
+                    "目标已有内容，将替换：{}。请展开文件变更检查差异。",
+                    path_string(&path)
+                ));
+            }
+            changes.push(Change {
+                path: path_string(&path),
+                before,
+                after: content.clone(),
                 sensitive: false,
-            },
-            hub.settings_change(&s)?,
-        ],
-        vec![
-            "仅导入 Agent Hub 管理数据，尚未安装到任何 Agent。导入过程不会执行 Skill 脚本。".into(),
-        ],
-    )
+            });
+        }
+        settings
+            .installations
+            .insert(path_string(&path), skill_id.into());
+    }
+    notes.push("共享的 .agents/skills 可能被多个 Agent 同时读取，写入会影响所有读取该目录的 Agent。添加后请在目标 Agent 的新会话中确认加载状态。".into());
+    Ok(())
 }
 #[tauri::command]
 #[specta::specta]
@@ -255,23 +359,19 @@ pub fn deploy_skill(hub: State<Hub>, skill_id: String, targets: Vec<Target>) -> 
     let content = snapshot(&hub.library_path(&skill)?)?;
     validate_skill(&content)?;
     let mut changes = vec![];
-    let mut seen = std::collections::BTreeSet::new();
-    for target in targets {
-        let path = hub.target(&target, true)?.join(&skill.name);
-        if !seen.insert(path.clone()) {
-            continue;
-        }
-        ensure_no_symlink_ancestors(&path)?;
-        changes.push(Change {
-            path: path_string(&path),
-            before: snapshot(&path)?,
-            after: content.clone(),
-            sensitive: false,
-        });
-        s.installations.insert(path_string(&path), skill_id.clone());
-    }
+    let mut notes = vec!["使用 Agent Hub 已管理的技能版本。".into()];
+    append_skill_targets(
+        &hub,
+        &mut s,
+        &skill_id,
+        &skill.name,
+        &content,
+        targets,
+        &mut changes,
+        &mut notes,
+    )?;
     changes.push(hub.settings_change(&s)?);
-    hub.queue(format!("分配 Skill · {}",skill.name),changes,vec!["Codex 与 Cursor 共用 .agents/skills；项目目录还可能被 Antigravity 读取。共享发现路径中的变更会影响所有读取它的 Agent，不能在此路径上分别停用。".into(),"采用普通文件复制；请检查原生目录中的其他同名资源。写入完成不代表 Agent 已加载，可能需要重启或新建会话。".into()])
+    hub.queue(format!("添加到 Agent · {}", skill.name), changes, notes)
 }
 #[tauri::command]
 #[specta::specta]
@@ -724,14 +824,9 @@ pub async fn apply_plan(app: AppHandle, hub: State<'_, Hub>, plan_id: String) ->
         let plans = hub.plans.lock().map_err(|_| "预览锁不可用")?;
         let plan = plans.get(&plan_id).ok_or("预览已失效，请重新生成")?;
         format!(
-            "{}\n\n将修改以下 {} 个目标并保存备份：\n{}\n\n是否应用？",
+            "{}\n\n将应用预览中的 {} 处文件变更，并自动保存本机备份。\n\n完整路径与差异已列在应用内的变更预览中。是否继续？",
             plan.title,
             plan.changes.len(),
-            plan.changes
-                .iter()
-                .map(|c| c.path.clone())
-                .collect::<Vec<_>>()
-                .join("\n")
         )
     };
     access::confirm(&app, "确认应用本机文件变更", description).await?;

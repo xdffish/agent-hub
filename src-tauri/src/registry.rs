@@ -8,6 +8,7 @@ macro_rules! command_registry {
             add_project => crate::commands::add_project,
             remove_project => crate::commands::remove_project,
             import_skill => crate::commands::import_skill,
+            add_skill_to_agents => crate::commands::add_skill_to_agents,
             deploy_skill => crate::commands::deploy_skill,
             remove_resource => crate::commands::remove_resource,
             delete_skill => crate::commands::delete_skill,

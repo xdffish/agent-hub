@@ -9,7 +9,7 @@ Agent Hub 使用 Tauri 2 更新器读取 GitHub Release 的 `latest.json`。启�
 3. CI 通过三平台检查后，构建安装包及签名。
 4. 发布任务汇总附件，校验平台与签名齐全，生成更新清单；附件上传完成后公开 Release。
 
-macOS Universal 更新包同时对应 Intel 与 Apple Silicon。Windows 使用 NSIS；Linux 应用内更新使用 AppImage。DEB/RPM 用户通过安装包或包管理器升级。
+macOS 分别构建 Apple Silicon（aarch64，包含 M5）与 Intel（x86_64）安装包及签名更新包；更新器按运行架构选择对应下载地址。Windows 使用 NSIS；Linux 应用内更新使用 AppImage。DEB/RPM 用户通过安装包或包管理器升级。
 
 第一次带更新器的版本仍需手动安装：v1.0.6 及更早版本不能接收应用内更新。更新器签名独立于 Windows 代码签名和 macOS 公证。
 

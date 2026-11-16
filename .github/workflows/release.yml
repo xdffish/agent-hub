@@ -56,7 +56,7 @@ jobs:
           [[ "$ARTIFACT_RUN" =~ ^[0-9]+$ ]]
           test "$(gh api "repos/$GH_REPO/actions/runs/$ARTIFACT_RUN" --jq '.head_sha')" = "$(git rev-parse HEAD)"
           gh api "repos/$GH_REPO/actions/runs/$ARTIFACT_RUN/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.name | startswith("package ("))] | length == 3 and all(.conclusion == "success")' | grep -qx true
+            --jq '[.jobs[] | select(.name | startswith("package ("))] | length == 4 and all(.conclusion == "success")' | grep -qx true
   check:
     if: ${{ inputs.artifacts_run_id == '' }}
     uses: ./.github/workflows/check.yml
@@ -69,8 +69,15 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            name: macos-universal
-            args: --target universal-apple-darwin --bundles app,dmg
+            name: macos-arm64
+            target: aarch64-apple-darwin
+            arch: aarch64
+            args: --target aarch64-apple-darwin --bundles app,dmg
+          - os: macos-15-intel
+            name: macos-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+            args: --target x86_64-apple-darwin --bundles app,dmg
           - os: windows-latest
             name: windows-x64
             args: --bundles nsis
@@ -89,7 +96,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install macOS targets
         if: runner.os == 'macOS'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: rustup target add ${{ matrix.target }}
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -105,6 +112,16 @@ jobs:
           NO_STRIP: "true"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Name macOS updater artifacts by architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_ARCH: ${{ matrix.arch }}
+          MAC_TARGET: ${{ matrix.target }}
+        run: |
+          for artifact in src-tauri/target/"$MAC_TARGET"/release/bundle/macos/*.app.tar.gz*; do
+            mv "$artifact" "${artifact/.app.tar.gz/_${MAC_ARCH}.app.tar.gz}"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: agent-hub-${{ matrix.name }}

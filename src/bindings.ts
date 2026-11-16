@@ -9,6 +9,7 @@ export const commands = {
 	addProject: (path: string) => __TAURI_INVOKE<null>("add_project", { path }),
 	removeProject: (path: string) => __TAURI_INVOKE<null>("remove_project", { path }),
 	importSkill: (source: string, subdir: string) => __TAURI_INVOKE<PlanView>("import_skill", { source, subdir }),
+	addSkillToAgents: (source: string, targets: Target_Deserialize[]) => __TAURI_INVOKE<PlanView>("add_skill_to_agents", { source, targets }),
 	deploySkill: (skillId: string, targets: Target_Deserialize[]) => __TAURI_INVOKE<PlanView>("deploy_skill", { skillId, targets }),
 	removeResource: (resourceId: string) => __TAURI_INVOKE<PlanView>("remove_resource", { resourceId }),
 	deleteSkill: (skillId: string) => __TAURI_INVOKE<PlanView>("delete_skill", { skillId }),

@@ -24,16 +24,16 @@ function fixture(run) {
   }
 }
 import { mkdirSync } from "node:fs";
-function build({ source, output, notes }, missingSignature = false) {
+function build(
+  { source, output, notes },
+  missingSignature = false,
+  macNames = ["Agent Hub_aarch64.app.tar.gz", "Agent Hub_x86_64.app.tar.gz"],
+) {
   mkdirSync(source);
-  for (const name of [
-    "Agent Hub.app.tar.gz",
-    "Agent Hub.exe",
-    "Agent Hub.AppImage",
-  ]) {
+  for (const name of [...macNames, "Agent Hub.exe", "Agent Hub.AppImage"]) {
     writeFileSync(join(source, name), "bundle");
     if (!missingSignature || !name.endsWith(".exe"))
-      writeFileSync(join(source, name + ".sig"), "test-signature");
+      writeFileSync(join(source, name + ".sig"), `signature:${name}`);
   }
   return spawnSync(
     process.execPath,
@@ -60,7 +60,13 @@ test("manifest maps every supported target to an uploaded filename and signature
     assert.equal(manifest.notes, "更新说明");
     assert.equal(Object.keys(manifest.platforms).length, 4);
     for (const entry of Object.values(manifest.platforms)) {
-      assert.equal(entry.signature, "test-signature");
+      const filename = decodeURIComponent(
+        new URL(entry.url).pathname.split("/").pop(),
+      );
+      assert.equal(
+        entry.signature,
+        readFileSync(join(ctx.output, filename + ".sig"), "utf8"),
+      );
       assert.ok(
         existsSync(
           join(
@@ -70,14 +76,32 @@ test("manifest maps every supported target to an uploaded filename and signature
         ),
       );
     }
-    assert.deepEqual(
-      manifest.platforms["darwin-aarch64"],
-      manifest.platforms["darwin-x86_64"],
+    assert.match(
+      manifest.platforms["darwin-aarch64"].url,
+      /_aarch64\.app\.tar\.gz$/,
+    );
+    assert.match(
+      manifest.platforms["darwin-x86_64"].url,
+      /_x86_64\.app\.tar\.gz$/,
     );
   }));
 test("missing signature prevents publishing a manifest", () =>
   fixture((ctx) => {
     const result = build(ctx, true);
     assert.notEqual(result.status, 0);
+    assert.equal(existsSync(join(ctx.output, "latest.json")), false);
+  }));
+test("unlabelled macOS bundles cannot be assigned to both architectures", () =>
+  fixture((ctx) => {
+    const result = build(ctx, false, ["Agent Hub.app.tar.gz"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Missing macOS architecture/);
+    assert.equal(existsSync(join(ctx.output, "latest.json")), false);
+  }));
+test("both macOS architectures are required before publishing", () =>
+  fixture((ctx) => {
+    const result = build(ctx, false, ["Agent Hub_aarch64.app.tar.gz"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Missing updater target: darwin-x86_64/);
     assert.equal(existsSync(join(ctx.output, "latest.json")), false);
   }));

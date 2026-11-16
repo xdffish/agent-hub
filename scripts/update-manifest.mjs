@@ -34,13 +34,21 @@ for (const file of files(source)) {
   if (existsSync(target))
     throw new Error(`Duplicate release artifact: ${name}`);
   copyFileSync(file, target);
-  const targets = name.endsWith(".app.tar.gz")
-    ? ["darwin-aarch64", "darwin-x86_64"]
-    : name.endsWith(".AppImage")
-      ? ["linux-x86_64"]
-      : name.endsWith(".exe")
-        ? ["windows-x86_64"]
-        : [];
+  if (
+    name.endsWith(".app.tar.gz") &&
+    !/_(aarch64|x86_64)\.app\.tar\.gz$/.test(name)
+  ) {
+    throw new Error(`Missing macOS architecture: ${name}`);
+  }
+  const targets = name.endsWith("_aarch64.app.tar.gz")
+    ? ["darwin-aarch64"]
+    : name.endsWith("_x86_64.app.tar.gz")
+      ? ["darwin-x86_64"]
+      : name.endsWith(".AppImage")
+        ? ["linux-x86_64"]
+        : name.endsWith(".exe")
+          ? ["windows-x86_64"]
+          : [];
   if (!targets.length) continue;
   const signature = readFileSync(`${file}.sig`, "utf8").trim();
   if (!signature) throw new Error(`Missing signature: ${name}`);

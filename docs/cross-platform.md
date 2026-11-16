@@ -34,13 +34,14 @@ Windows 不提供 Unix 可执行位，导入时会将该字段按本机语义归
 
 | 构建目标                                 | 产物                        |
 | ---------------------------------------- | --------------------------- |
-| macOS Universal（Apple Silicon / Intel） | `.app`、`.dmg`，上传 `.dmg` |
+| macOS Apple Silicon（arm64，含 M5） | `.app`、`.dmg`、签名更新包 |
+| macOS Intel（x86_64） | `.app`、`.dmg`、签名更新包 |
 | Windows x64                              | NSIS `.exe`                 |
 | Linux x64（Ubuntu 24.04）                | `.deb`、`.rpm`、`.AppImage` |
 
-推送 `v*` 标签后，工作流先核对 Tag 与 npm、Tauri、Cargo 版本，再运行三平台检查和打包。全部通过后会自动创建 GitHub Release，生成更新说明并附上五类安装包。预发布版本 Tag（例如 `v1.1.0-beta.1`）会标记为预发布。也可手动运行工作流并提供已存在的版本 Tag。Release 更新说明使用 GitHub 自动生成规则，并按 `.github/release.yml` 分类。
+推送 `v*` 标签后，工作流先核对 Tag 与 npm、Tauri、Cargo 版本，再运行三平台检查和打包。全部通过后会自动创建 GitHub Release，生成更新说明并附上按平台和架构区分的安装包及更新清单。预发布版本 Tag（例如 `v1.1.0-beta.1`）会标记为预发布。也可手动运行工作流并提供已存在的版本 Tag。Release 更新说明使用 GitHub 自动生成规则，并按 `.github/release.yml` 分类。
 
-当前未配置代码签名、macOS 公证或应用内自动更新。
+更新包使用独立签名校验，应用内更新见 [更新发布说明](auto-update.md)。当前未配置操作系统代码签名与 macOS 公证。
 
 `npm run release` 可在三个系统上同步版本并运行本机构建，或创建版本提交与 Tag 并推送，触发 GitHub Release。远程发布要求干净工作区、可用的 `origin`、Git 提交者身份及 GitHub 写入权限。通过 Node.js 直接调用 Tauri CLI，避免依赖 Unix Shell。`scripts/dev.sh` 是 macOS/Linux 的可选开发辅助脚本；Windows 使用 `npm run tauri dev`。
 

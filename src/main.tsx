@@ -1,4 +1,5 @@
 import { AppUpdater } from "./AppUpdater";
+declare const __BUILD_INFO__: { channel: string; time: string };
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
@@ -304,7 +305,7 @@ function useDialogFocus(key: string, onClose: () => void) {
   }, [key]);
 }
 function App() {
-  const [appVersion, setAppVersion] = useState("0.1.0");
+  const [appVersion, setAppVersion] = useState("");
   const [view, setView] = useState<View>("overview");
   const [kind, setKind] = useState("all");
   const [agent, setAgent] = useState("all");
@@ -652,7 +653,17 @@ function App() {
           </button>
           <div className="local-foot">
             <ShieldCheck size={14} />
-            数据保存在本机<span>v{appVersion}</span>
+            数据保存在本机
+            <span>
+              {appVersion ? `v${appVersion}` : "读取版本中"} ·{" "}
+              {__BUILD_INFO__.channel}
+            </span>
+          </div>
+          <div className="build-time">
+            构建于{" "}
+            {new Date(__BUILD_INFO__.time).toLocaleString("zh-CN", {
+              hour12: false,
+            })}
           </div>
         </div>
       </aside>
@@ -1541,7 +1552,7 @@ function App() {
                     onClick={() => setModal("deploy")}
                   >
                     <ArrowLeftRight size={15} />
-                    分配到 Agent
+                    添加到其他 Agent
                   </button>
                   <button
                     className="button"
@@ -1579,16 +1590,10 @@ function App() {
                   <button
                     className="button primary"
                     disabled={!!busy}
-                    onClick={() =>
-                      void job("生成导入预览", () =>
-                        preview(
-                          commands.importSkill(selection.item.canonical, ""),
-                        ),
-                      )
-                    }
+                    onClick={() => setModal("deploy")}
                   >
                     <Plus size={15} />
-                    导入管理副本
+                    添加到其他 Agent
                   </button>
                 )}
               {selection.type === "resource" &&
@@ -1671,6 +1676,12 @@ function App() {
                 ))
               ) : selection.type === "resource" &&
                 selection.item.kind === "skill" &&
+                selection.item.detail.startsWith("由 Antigravity 插件") ? (
+                <p className="native-control-hint" role="note">
+                  {selection.item.detail}
+                </p>
+              ) : selection.type === "resource" &&
+                selection.item.kind === "skill" &&
                 (selection.item.is_link ||
                   pathIdentity(
                     selection.item.path,
@@ -1749,11 +1760,21 @@ function App() {
                   commands.importSkill(values.source, values.subdir),
                 );
               if (modal === "deploy") {
-                if (!currentSkill)
-                  throw new Error("请先选择由 Agent Hub 管理的 Skill");
-                await preview(
-                  commands.deploySkill(currentSkill.id, values.targets),
-                );
+                if (currentSkill) {
+                  await preview(
+                    commands.deploySkill(currentSkill.id, values.targets),
+                  );
+                } else if (
+                  selection?.type === "resource" &&
+                  selection.item.kind === "skill"
+                ) {
+                  await preview(
+                    commands.addSkillToAgents(
+                      selection.item.canonical,
+                      values.targets,
+                    ),
+                  );
+                } else throw new Error("请先选择一个 Skill");
               }
               if (modal === "mcp")
                 await preview(
@@ -1835,7 +1856,7 @@ function App() {
                 <ShieldCheck size={18} />
                 <p>
                   {plan.changes.length}{" "}
-                  个目标将发生变化。应用前再次检查文件，并保存私有备份。
+                  处文件位置将更新。应用时会再次检查文件，并自动保存本机备份。
                 </p>
               </div>
               {plan.notes.map((n, i) => (
@@ -1843,15 +1864,24 @@ function App() {
                   {n}
                 </p>
               ))}
-              {plan.changes.map((c) => (
-                <div className="diff" key={c.path}>
-                  <div>
-                    <FileCode2 size={14} />
-                    <code>{c.path}</code>
+              <details>
+                <summary>查看文件变更（{plan.changes.length} 个位置）</summary>
+                {plan.changes.map((c) => (
+                  <div className="diff" key={c.path}>
+                    <div>
+                      <FileCode2 size={14} />
+                      <code>{c.path}</code>
+                    </div>
+                    <pre
+                      tabIndex={0}
+                      role="region"
+                      aria-label={`${c.path} 的文件差异`}
+                    >
+                      <code>{c.diff}</code>
+                    </pre>
                   </div>
-                  <pre>{c.diff}</pre>
-                </div>
-              ))}
+                ))}
+              </details>
             </div>
             <div className="modal-footer">
               <button
@@ -1886,7 +1916,9 @@ function App() {
                 ) : (
                   <Check size={16} />
                 )}
-                确认应用
+                {plan.title.startsWith("添加到 Agent")
+                  ? "确认添加"
+                  : "确认应用"}
               </button>
             </div>
           </section>
@@ -1933,6 +1965,10 @@ function ResourceLocations({
                     ? checkDescription(r, checks)
                     : r.description}
                 </small>
+                {r.kind === "skill" &&
+                  r.detail.startsWith("由 Antigravity 插件") && (
+                    <small>{r.detail.split("。", 1)[0]}</small>
+                  )}
                 <small>{shortPath(r.path)}</small>
               </span>
               <ArrowUpRight size={14} />
@@ -2470,7 +2506,7 @@ function ActionModal({
   }
   const titles: Record<string, string> = {
     import: "导入 Skill",
-    deploy: `分配 ${skill?.name ?? "Skill"}`,
+    deploy: "添加到其他 Agent",
     mcp: "添加 / 编辑 MCP",
     project: "添加项目目录",
     export: "导出管理数据",
@@ -2515,6 +2551,15 @@ function ActionModal({
           </button>
         </div>
         <div className="modal-body">
+          {modal === "deploy" && (
+            <div className="plan-summary">
+              <BookOpen size={20} aria-hidden="true" />
+              <div>
+                <b>{skill?.name ?? selectedResource?.name}</b>
+                <p>{skill?.description ?? selectedResource?.description}</p>
+              </div>
+            </div>
+          )}
           {pathError && (
             <p role="alert" className="warning-text">
               {pathError}
@@ -2679,12 +2724,12 @@ function ActionModal({
                 </div>
               </fieldset>
               <label className="field">
-                作用域
+                使用范围
                 <select
                   value={project}
                   onChange={(e) => setProject(e.target.value)}
                 >
-                  <option value="">全局</option>
+                  <option value="">所有项目（用户级）</option>
                   {data?.projects.map((p) => (
                     <option key={p} value={p}>
                       {p}
@@ -2694,9 +2739,11 @@ function ActionModal({
               </label>
               {modal === "deploy" && (
                 <p className="help">
-                  共享的 .agents/skills 可能被多个 Agent
-                  同时读取，预览会说明影响范围。导入的 Skill
-                  未经自动兼容性认证。
+                  {skill
+                    ? "使用技能库中的管理版本。"
+                    : "同时保存到 Agent Hub 技能库，方便后续管理与更新。"}
+                  共享目录可能被多个 Agent
+                  同时读取，下一步可查看安装位置和差异。
                 </p>
               )}
             </>
